@@ -47,6 +47,12 @@ const routes: IRoute[] = [
     path: '/data-tables',
   },
   {
+    name: 'Wallets',
+    layout: '/admin',
+    icon: <Icon as={MdOutlineShoppingCart} width="20px" height="20px" color="inherit" />,
+    path: '/wallets',
+  },
+  {
     name: 'Profile',
     layout: '/admin',
     path: '/profile',
