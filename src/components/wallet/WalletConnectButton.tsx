@@ -93,7 +93,10 @@ export default function WalletConnectButton() {
 
   // Handle connect wallet click
   const handleConnectWallet = async () => {
-    if (!selectedWallet) return;
+    if (!selectedWallet) {
+      console.error('No wallet selected'); // Add this log
+      return;
+    };
     
     try {
       // setError(null);

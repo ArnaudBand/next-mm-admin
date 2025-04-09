@@ -1,462 +1,435 @@
-'use client';
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  ReactNode,
-} from 'react';
+"use client";
+
+import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 
 // Define wallet types
 export type WalletType = 'metamask' | 'tronlink' | 'solana' | null;
 
-// Define error types for better debugging
-export interface WalletError {
-  type: string;
-  message: string;
-  details?: any;
+// Wallet info type
+interface WalletInfo {
+  address: string;
+  balance: string;
+  network: string;
+  type: WalletType;
 }
 
+// Wallet context interface
 interface WalletContextType {
   connected: boolean;
-  walletType: WalletType;
-  address: string | null;
-  balance: string | null;
+  connecting: boolean;
+  isLoading: boolean;
+  walletInfo: WalletInfo | null;
+  error: string | null;
   connectWallet: (type: WalletType) => Promise<boolean>;
   disconnectWallet: () => void;
-  isLoading: boolean;
-  lastError: WalletError | null;
-  checkWalletAvailability: (type: WalletType) => boolean;
 }
 
-const WalletContext = createContext<WalletContextType>({
-  connected: false,
-  walletType: null,
-  address: null,
-  balance: null,
-  connectWallet: async () => false,
-  disconnectWallet: () => {},
-  isLoading: false,
-  lastError: null,
-  checkWalletAvailability: () => false,
-});
+// Create the context
+const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
-export const useWallet = () => useContext(WalletContext);
+// Provider component
+export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [connected, setConnected] = useState<boolean>(false);
+  const [connecting, setConnecting] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-interface WalletProviderProps {
-  children: ReactNode;
-}
-
-export const WalletProvider = ({ children }: WalletProviderProps) => {
-  const [connected, setConnected] = useState(false);
-  const [walletType, setWalletType] = useState<WalletType>(null);
-  const [address, setAddress] = useState<string | null>(null);
-  const [balance, setBalance] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [lastError, setLastError] = useState<{
-    type: string;
-    message: string;
-  } | null>(null);
-
-  // Check if previously connected
+  // Check for existing connections on mount
   useEffect(() => {
-    const savedWallet = localStorage.getItem('walletType') as WalletType;
-    if (savedWallet) {
-      console.log(
-        `Found saved wallet type: ${savedWallet}, attempting to reconnect...`,
-      );
-      connectWallet(savedWallet);
-    }
+    const checkExistingConnections = async () => {
+      try {
+        // Check if MetaMask is connected
+        if (window.ethereum && window.ethereum.selectedAddress) {
+          const address = window.ethereum.selectedAddress;
+          await setupEthereumWallet(address);
+          return;
+        }
+        
+        // Check if TronLink is connected
+        if (window.tronWeb && window.tronWeb.defaultAddress.base58) {
+          const address = window.tronWeb.defaultAddress.base58;
+          await setupTronWallet(address);
+          return;
+        }
+        
+        // Check if Solana wallet is connected
+        if (window.solana && window.solana.isConnected) {
+          const address = window.solana.publicKey.toString();
+          await setupSolanaWallet(address);
+          return;
+        }
+      } catch (err) {
+        console.error("Error checking existing connections:", err);
+      }
+    };
+    
+    checkExistingConnections();
   }, []);
 
-  // Check if a specific wallet is available
-  // Improve wallet availability checking in src/contexts/walletContext.tsx
-  const checkWalletAvailability = (type: WalletType): boolean => {
-    if (typeof window === 'undefined') return false;
-
-    console.log(`Checking availability for ${type}`); // Add this log
-
+  // Setup Ethereum wallet
+  const setupEthereumWallet = async (address: string) => {
     try {
-      switch (type) {
-        case 'metamask':
-          const { ethereum } = window as any;
-          const isMetaMaskAvailable = !!ethereum && !!ethereum.isMetaMask;
-          console.log(`MetaMask available: ${isMetaMaskAvailable}`); // Add this log
-          return isMetaMaskAvailable;
-        case 'tronlink':
-          const tronWeb = (window as any).tronWeb;
-          const isTronLinkAvailable = !!tronWeb;
-          console.log(`TronLink available: ${isTronLinkAvailable}`); // Add this log
-          return isTronLinkAvailable;
-        case 'solana':
-          const solana =
-            (window as any).solana || (window as any).phantom?.solana;
-          const isSolanaAvailable = !!solana;
-          console.log(`Solana wallet available: ${isSolanaAvailable}`); // Add this log
-          return isSolanaAvailable;
-        default:
-          return false;
+      // Get network
+      const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+      let network = 'Unknown Network';
+      
+      // Map chain ID to network name
+      const networkMap: Record<string, string> = {
+        '0x1': 'Ethereum Mainnet',
+        '0x3': 'Ropsten Testnet',
+        '0x4': 'Rinkeby Testnet',
+        '0x5': 'Goerli Testnet',
+        '0x2a': 'Kovan Testnet',
+        '0x89': 'Polygon Mainnet',
+        '0xa86a': 'Avalanche Mainnet',
+      };
+      
+      network = networkMap[chainId] || `Chain ID: ${chainId}`;
+      
+      // Get balance
+      const balanceHex = await window.ethereum.request({
+        method: 'eth_getBalance',
+        params: [address, 'latest'],
+      });
+      
+      // Convert hex balance to ETH
+      const balance = (parseInt(balanceHex, 16) / 1e18).toFixed(4);
+      
+      setWalletInfo({
+        address,
+        balance: `${balance} ETH`,
+        network,
+        type: 'metamask',
+      });
+      
+      setConnected(true);
+      setError(null);
+      
+      // Set up event listeners
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
+      window.ethereum.on('disconnect', handleDisconnect);
+      
+      return true;
+    } catch (err) {
+      console.error("Error setting up Ethereum wallet:", err);
+      setError("Failed to set up Ethereum wallet");
+      return false;
+    }
+  };
+  
+  // Handle Ethereum accounts changed
+  const handleAccountsChanged = (accounts: string[]) => {
+    if (accounts.length === 0) {
+      // User disconnected their wallet
+      disconnectWallet();
+    } else if (accounts[0] !== walletInfo?.address) {
+      // User switched accounts
+      setupEthereumWallet(accounts[0]);
+    }
+  };
+  
+  // Handle Ethereum chain changed
+  const handleChainChanged = () => {
+    // Reload when the chain changes
+    window.location.reload();
+  };
+  
+  // Handle Ethereum disconnect
+  const handleDisconnect = () => {
+    disconnectWallet();
+  };
+
+  // Setup TRON wallet
+  const setupTronWallet = async (address: string) => {
+    try {
+      // Get network
+      const network = window.tronWeb.fullNode.host.includes('shasta')
+        ? 'Shasta Testnet'
+        : window.tronWeb.fullNode.host.includes('nile')
+        ? 'Nile Testnet'
+        : 'TRON Mainnet';
+      
+      // Get balance
+      const balanceInSun = await window.tronWeb.trx.getBalance(address);
+      const balance = (balanceInSun / 1e6).toFixed(4); // Convert Sun to TRX
+      
+      setWalletInfo({
+        address,
+        balance: `${balance} TRX`,
+        network,
+        type: 'tronlink',
+      });
+      
+      setConnected(true);
+      setError(null);
+      
+      // Set up event listeners if available
+      if (window.tronWeb.eventServer) {
+        window.tronWeb.eventServer.on('addressChanged', () => {
+          if (window.tronWeb.defaultAddress.base58 !== address) {
+            setupTronWallet(window.tronWeb.defaultAddress.base58);
+          }
+        });
       }
-    } catch (error) {
-      console.error(`Error checking ${type} availability:`, error);
+      
+      return true;
+    } catch (err) {
+      console.error("Error setting up TRON wallet:", err);
+      setError("Failed to set up TRON wallet");
       return false;
     }
   };
 
-  // Connect to wallet
-  const connectWallet = async (type: WalletType): Promise<boolean> => {
-    setIsLoading(true);
-    setLastError(null);
-
-    // First, check if the wallet is available
-    if (!checkWalletAvailability(type)) {
-      const errorMessage = `${type} wallet is not installed or not accessible`;
-      console.error(errorMessage);
-      setLastError({
-        type: 'WALLET_NOT_FOUND',
-        message: errorMessage,
+  // Setup Solana wallet
+  const setupSolanaWallet = async (address: string) => {
+    try {
+      // Get network
+      const connection = window.solana.connection;
+      const network = connection.rpcEndpoint.includes('devnet')
+        ? 'Solana Devnet'
+        : connection.rpcEndpoint.includes('testnet')
+        ? 'Solana Testnet'
+        : 'Solana Mainnet';
+      
+      // Get balance
+      const balanceInLamports = await connection.getBalance(window.solana.publicKey);
+      const balance = (balanceInLamports / 1e9).toFixed(4); // Convert lamports to SOL
+      
+      setWalletInfo({
+        address,
+        balance: `${balance} SOL`,
+        network,
+        type: 'solana',
       });
-      setIsLoading(false);
+      
+      setConnected(true);
+      setError(null);
+      
+      // Set up event listeners
+      window.solana.on('disconnect', disconnectWallet);
+      window.solana.on('accountChanged', () => {
+        if (window.solana.publicKey) {
+          setupSolanaWallet(window.solana.publicKey.toString());
+        } else {
+          disconnectWallet();
+        }
+      });
+      
+      return true;
+    } catch (err) {
+      console.error("Error setting up Solana wallet:", err);
+      setError("Failed to set up Solana wallet");
       return false;
     }
+  };
 
-    console.log(`Attempting to connect to ${type}...`);
-
+  // Connect wallet function
+  const connectWallet = async (type: WalletType): Promise<boolean> => {
+    if (!type) return false;
+    
+    setIsLoading(true);
+    setConnecting(true);
+    setError(null);
+    
     try {
-      switch (type) {
-        case 'metamask':
-          return await connectMetaMask();
-        case 'tronlink':
-          return await connectTronLink();
-        case 'solana':
-          return await connectSolana();
-        default:
-          setLastError({
-            type: 'INVALID_WALLET',
-            message: 'Invalid wallet type specified',
-          });
-          return false;
+      if (type === 'metamask') {
+        return await connectMetaMask();
+      } else if (type === 'tronlink') {
+        return await connectTronLink();
+      } else if (type === 'solana') {
+        return await connectSolanaWallet();
       }
-    } catch (error) {
-      console.error(`Error connecting to ${type}:`, error);
-      setLastError({
-        type: `${type.toUpperCase()}_CONNECTION_ERROR`,
-        message: `Failed to connect to ${type}: ${'Unknown error'}`,
-      });
+      return false;
+    } catch (err: any) {
+      console.error(`Error connecting to ${type} wallet:`, err);
+      setError(err.message || `Failed to connect to ${type} wallet`);
       return false;
     } finally {
       setIsLoading(false);
+      setConnecting(false);
     }
   };
 
-  // MetaMask connection
+  // Connect to MetaMask
   const connectMetaMask = async (): Promise<boolean> => {
-    if (typeof window === 'undefined') return false;
-
-    // Check if MetaMask is installed
-    const { ethereum } = window as any;
-    if (!ethereum || !ethereum.isMetaMask) {
-      console.error('MetaMask is not installed or not accessible');
-      setLastError({
-        type: 'METAMASK_NOT_FOUND',
-        message: 'MetaMask extension not found',
-      });
+    if (!window.ethereum) {
+      setError("MetaMask is not installed. Please install MetaMask extension first.");
       return false;
     }
-
     
     try {
-      console.log('Connecting to Ethereum via MetaMask...');
       // Request account access
-      const accounts = await ethereum.request({
-        method: 'eth_requestAccounts',
-      });
-
-      console.log('MetaMask accounts:', accounts);
-
-      if (!accounts || accounts.length === 0) {
-        console.error('No Ethereum accounts found');
-        setLastError({
-          type: 'NO_ACCOUNTS',
-          message: 'No Ethereum accounts available',
-        });
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      
+      if (accounts.length === 0) {
+        setError("No accounts found. Please unlock your MetaMask wallet.");
         return false;
       }
-
-      const account = accounts[0];
-      console.log(`MetaMask account connected: ${account}`);
-
-      // Get balance
-      const balance = await ethereum.request({
-        method: 'eth_getBalance',
-        params: [account, 'latest'],
-      });
-
-      // Convert balance from wei to ETH
-      const ethBalance = parseInt(balance, 16) / 1e18;
-
-      setAddress(account);
-      setBalance(ethBalance.toFixed(4));
-      setWalletType('metamask');
-      setConnected(true);
-
-      // Save connection info
-      localStorage.setItem('walletType', 'metamask');
-
-      // Set up listeners for account changes
-      ethereum.on('accountsChanged', (newAccounts: string[]) => {
-        console.log('MetaMask accounts changed:', newAccounts);
-        if (newAccounts.length === 0) {
-          disconnectWallet();
-        } else {
-          setAddress(newAccounts[0]);
-          // Update balance for the new account
-          updateMetaMaskBalance(newAccounts[0]);
-        }
-      });
-
-      // Listen for chain changes
-      ethereum.on('chainChanged', (chainId: string) => {
-        console.log('MetaMask chain changed:', chainId);
-        // Refresh the page when the chain changes
-        window.location.reload();
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Error connecting to MetaMask:', error);
-      setLastError({
-        type: 'METAMASK_CONNECTION_ERROR',
-        message: `MetaMask connection error: ${'Unknown error'}`,
-      });
+      
+      return await setupEthereumWallet(accounts[0]);
+    } catch (err: any) {
+      if (err.code === 4001) {
+        // User rejected the request
+        setError("User rejected the connection request");
+      } else {
+        setError(err.message || "Failed to connect to MetaMask");
+      }
       return false;
     }
   };
 
-  // Helper function to update MetaMask balance
-  const updateMetaMaskBalance = async (account: string) => {
-    const { ethereum } = window as any;
-    if (!ethereum) return;
-
-    try {
-      const balance = await ethereum.request({
-        method: 'eth_getBalance',
-        params: [account, 'latest'],
-      });
-
-      const ethBalance = parseInt(balance, 16) / 1e18;
-      setBalance(ethBalance.toFixed(4));
-    } catch (error) {
-      console.error('Error updating MetaMask balance:', error);
-    }
-  };
-
-  // TronLink connection
+  // Connect to TronLink
   const connectTronLink = async (): Promise<boolean> => {
-    if (typeof window === 'undefined') return false;
-
-    // Check if TronLink is installed
-    const tronWeb = (window as any).tronWeb;
-    if (!tronWeb) {
-      setLastError({
-        type: 'TRONLINK_NOT_FOUND',
-        message: 'TronLink extension not found',
-      });
+    if (!window.tronWeb) {
+      setError("TronLink is not installed. Please install TronLink extension first.");
       return false;
     }
-
-    console.log('Connecting to TRON via TronLink...');
-    console.log('TronWeb ready state:', tronWeb.ready);
-
+    
     try {
-      // Wait for permission
-      if (!tronWeb.ready) {
-        console.log('TronLink not ready, requesting accounts...');
-        // Check if tronLink object exists
-        if (!(window as any).tronLink) {
-          setLastError({
-            type: 'TRONLINK_NOT_INITIALIZED',
-            message: 'TronLink is installed but not initialized',
-          });
-          return false;
-        }
-
-        // Request access
-        try {
-          await (window as any).tronLink.request({
-            method: 'tron_requestAccounts',
-          });
-          // Wait a moment for TronLink to update
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        } catch (requestError) {
-          console.error('Error requesting TronLink accounts:', requestError);
-          setLastError({
-            type: 'TRONLINK_REQUEST_ERROR',
-            message: `TronLink request error: ${'Unknown error'}`,
-          });
-          return false;
+      // Check if TronLink is locked
+      if (!window.tronWeb.defaultAddress.base58) {
+        // Request account access if tronWeb is available but not connected
+        if (window.tronLink) {
+          await window.tronLink.request({ method: 'tron_requestAccounts' });
+        } else {
+          throw new Error("Please unlock your TronLink wallet");
         }
       }
-
-      // Check if permission was granted
-      if (!tronWeb.ready) {
-        console.log('TronLink still not ready after request');
-        setLastError({
-          type: 'TRONLINK_NOT_READY',
-          message: 'Please unlock TronLink and authorize this site',
-        });
+      
+      // Check again after request
+      if (!window.tronWeb.defaultAddress.base58) {
+        setError("No accounts found. Please unlock your TronLink wallet.");
         return false;
       }
-
-      // Get account and balance
-      const account = tronWeb.defaultAddress.base58;
-      console.log(`TronLink account connected: ${account}`);
-
-      if (!account) {
-        setLastError({
-          type: 'NO_TRON_ACCOUNT',
-          message: 'No TRON account available',
-        });
-        return false;
+      
+      return await setupTronWallet(window.tronWeb.defaultAddress.base58);
+    } catch (err: any) {
+      if (err.code === 4001) {
+        // User rejected the request
+        setError("User rejected the connection request");
+      } else {
+        setError(err.message || "Failed to connect to TronLink");
       }
-
-      const balanceInSun = await tronWeb.trx.getBalance(account);
-      const trxBalance = balanceInSun / 1e6; // Convert from SUN to TRX
-
-      setAddress(account);
-      setBalance(trxBalance.toFixed(4));
-      setWalletType('tronlink');
-      setConnected(true);
-
-      // Save connection info
-      localStorage.setItem('walletType', 'tronlink');
-
-      // Set up event listener for account changes
-      window.addEventListener('message', function (e) {
-        if (e.data.message && e.data.message.action === 'setAccount') {
-          console.log('TronLink account changed:', e.data.message);
-          if (e.data.message.data.address) {
-            setAddress(tronWeb.address.fromHex(e.data.message.data.address));
-            updateTronLinkBalance(
-              tronWeb.address.fromHex(e.data.message.data.address),
-            );
-          } else {
-            disconnectWallet();
-          }
-        } else if (e.data.message && e.data.message.action === 'setNode') {
-          console.log('TronLink network changed:', e.data.message);
-          // Network changed
-          window.location.reload();
-        }
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Error connecting to TronLink:', error);
-      setLastError({
-        type: 'TRONLINK_CONNECTION_ERROR',
-        message: `TronLink connection error: ${'Unknown error'}`,
-      });
       return false;
     }
   };
 
-  // Helper function to update TronLink balance
-  const updateTronLinkBalance = async (account: string) => {
-    const tronWeb = (window as any).tronWeb;
-    if (!tronWeb) return;
-
-    try {
-      const balanceInSun = await tronWeb.trx.getBalance(account);
-      const trxBalance = balanceInSun / 1e6;
-      setBalance(trxBalance.toFixed(4));
-    } catch (error) {
-      console.error('Error updating TronLink balance:', error);
-    }
-  };
-
-  // Solana connection
-  const connectSolana = async (): Promise<boolean> => {
-    if (typeof window === 'undefined') return false;
-
-    // Check if Solana wallet (like Phantom) is installed
-    const solana = (window as any).solana || (window as any).phantom?.solana;
-    if (!solana) {
-      setLastError({
-        type: 'SOLANA_WALLET_NOT_FOUND',
-        message: 'Solana wallet like Phantom not found',
-      });
+  // Connect to Solana wallet
+  const connectSolanaWallet = async (): Promise<boolean> => {
+    if (!window.solana) {
+      setError("Solana wallet is not installed. Please install Phantom or another Solana wallet extension.");
       return false;
     }
-
-    console.log('Connecting to Solana wallet...');
-
+    
     try {
-      // Request connection
-      const resp = await solana.connect();
-      const publicKey = resp.publicKey.toString();
-      console.log(`Solana wallet connected: ${publicKey}`);
-
-      // For Solana, getting balance typically requires an RPC connection
-      // This is simplified - in a real app you'd use a library like @solana/web3.js
-      setAddress(publicKey);
-      setBalance('Loading...'); // Placeholder for demo
-
-      // In a real app, you might fetch the balance like this:
-      // const connection = new Connection('https://api.mainnet-beta.solana.com');
-      // const balance = await connection.getBalance(new PublicKey(publicKey));
-      // setBalance((balance / LAMPORTS_PER_SOL).toFixed(4));
-
-      setWalletType('solana');
-      setConnected(true);
-
-      // Save connection info
-      localStorage.setItem('walletType', 'solana');
-
-      // Set up listeners
-      solana.on('accountChanged', () => {
-        console.log('Solana account changed');
-        // Reload when account changes
-        window.location.reload();
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Error connecting to Solana wallet:', error);
-      setLastError({
-        type: 'SOLANA_CONNECTION_ERROR',
-        message: `Solana wallet connection error: ${'Unknown error'}`,
-      });
+      // Request connection to Solana wallet
+      const connected = await window.solana.connect();
+      
+      if (!connected || !window.solana.publicKey) {
+        setError("Failed to connect to Solana wallet");
+        return false;
+      }
+      
+      return await setupSolanaWallet(window.solana.publicKey.toString());
+    } catch (err: any) {
+      if (err.code === 4001) {
+        // User rejected the request
+        setError("User rejected the connection request");
+      } else {
+        setError(err.message || "Failed to connect to Solana wallet");
+      }
       return false;
     }
   };
 
   // Disconnect wallet
-  const disconnectWallet = () => {
-    console.log('Disconnecting wallet');
+  const disconnectWallet = useCallback(() => {
+    // Clean up based on wallet type
+    if (walletInfo?.type === 'metamask' && window.ethereum) {
+      window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+      window.ethereum.removeListener('chainChanged', handleChainChanged);
+      window.ethereum.removeListener('disconnect', handleDisconnect);
+    } else if (walletInfo?.type === 'solana' && window.solana) {
+      window.solana.disconnect();
+    }
+    // For TronLink there's no standard disconnect method
+    
+    // Reset state
     setConnected(false);
-    setWalletType(null);
-    setAddress(null);
-    setBalance(null);
-    setLastError(null);
-    localStorage.removeItem('walletType');
+    setWalletInfo(null);
+    setError(null);
+  }, [walletInfo]);
+
+  // Context value
+  const value: WalletContextType = {
+    connected,
+    connecting,
+    isLoading,
+    walletInfo,
+    error,
+    connectWallet,
+    disconnectWallet,
   };
 
   return (
-    <WalletContext.Provider
-      value={{
-        connected,
-        walletType,
-        address,
-        balance,
-        connectWallet,
-        disconnectWallet,
-        isLoading,
-        lastError,
-        checkWalletAvailability,
-      }}
-    >
+    <WalletContext.Provider value={value}>
       {children}
     </WalletContext.Provider>
   );
 };
+
+// Custom hook for using the wallet context
+export const useWallet = (): WalletContextType => {
+  const context = useContext(WalletContext);
+  if (context === undefined) {
+    throw new Error('useWallet must be used within a WalletProvider');
+  }
+  return context;
+};
+
+// Type definitions for wallet interfaces
+declare global {
+  interface Window {
+    ethereum?: {
+      isMetaMask?: boolean;
+      selectedAddress?: string;
+      request: (args: { method: string; params?: any[] }) => Promise<any>;
+      on: (event: string, callback: (...args: any[]) => void) => void;
+      removeListener: (event: string, callback: (...args: any[]) => void) => void;
+    };
+    tronWeb?: {
+      defaultAddress: {
+        base58: string;
+        hex: string;
+      };
+      fullNode: {
+        host: string;
+      };
+      trx: {
+        getBalance: (address: string) => Promise<number>;
+      };
+      eventServer?: {
+        on: (event: string, callback: (...args: any[]) => void) => void;
+      };
+    };
+    tronLink?: {
+      request: (args: { method: string }) => Promise<void>;
+    };
+    solana?: {
+      isPhantom?: boolean;
+      publicKey?: {
+        toString: () => string;
+      };
+      connection: {
+        rpcEndpoint: string;
+        getBalance: (publicKey: any) => Promise<number>;
+      };
+      isConnected: boolean;
+      connect: () => Promise<any>;
+      disconnect: () => Promise<void>;
+      on: (event: string, callback: (...args: any[]) => void) => void;
+    };
+  }
+}

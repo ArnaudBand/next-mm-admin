@@ -136,8 +136,8 @@ export default function WalletPage() {
                 colorScheme="orange"
                 size="md"
                 width="full"
-                onClick={(e) => {
-                  e.stopPropagation();
+                onClick={() => {
+                  // e.stopPropagation();
                   handleWalletSelect('metamask');
                 }}
               >
@@ -179,8 +179,8 @@ export default function WalletPage() {
                 colorScheme="red"
                 size="md"
                 width="full"
-                onClick={(e) => {
-                  e.stopPropagation();
+                onClick={() => {
+                  // e.stopPropagation();
                   handleWalletSelect('tronlink');
                 }}
               >
@@ -222,8 +222,8 @@ export default function WalletPage() {
                 colorScheme="purple"
                 size="md"
                 width="full"
-                onClick={(e) => {
-                  e.stopPropagation();
+                onClick={() => {
+                  // e.stopPropagation();
                   handleWalletSelect('solana');
                 }}
               >

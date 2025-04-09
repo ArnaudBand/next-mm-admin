@@ -11,6 +11,7 @@ import Footer from 'components/footer/FooterAdmin';
 import Navbar from 'components/navbar/NavbarAdmin';
 import Sidebar from 'components/sidebar/Sidebar';
 import { SidebarContext } from 'contexts/SidebarContext';
+import { WalletProvider } from 'contexts/walletContext'; 
 import { PropsWithChildren, useEffect, useState } from 'react';
 import routes from 'routes';
 import {
@@ -39,6 +40,7 @@ export default function AdminLayout(props: DashboardLayoutProps) {
   const bg = useColorModeValue('secondaryGray.300', 'navy.900');
 
   return (
+    <WalletProvider>
     <Box h="100vh" w="100vw" bg={bg}>
       <SidebarContext.Provider
         value={{
@@ -90,5 +92,6 @@ export default function AdminLayout(props: DashboardLayoutProps) {
         </Box>
       </SidebarContext.Provider>
     </Box>
+    </WalletProvider>
   );
 }

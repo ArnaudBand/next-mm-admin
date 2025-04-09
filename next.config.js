@@ -12,6 +12,7 @@ const nextConfig = {
     // Make ENV
     unoptimized: true,
   },
+  allowedDevOrigins: ['local-origin.dev', '*.local-origin.dev'],
 };
 
 // module.exports = withTM(nextConfig);
