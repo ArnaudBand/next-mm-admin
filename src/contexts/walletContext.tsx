@@ -13,15 +13,26 @@ interface WalletInfo {
   type: WalletType;
 }
 
+// Error type
+interface WalletError {
+  type: string;
+  message: string;
+}
+
 // Wallet context interface
 interface WalletContextType {
   connected: boolean;
   connecting: boolean;
   isLoading: boolean;
   walletInfo: WalletInfo | null;
+  walletType: WalletType;
+  address: string | null;
+  balance: string | null;
   error: string | null;
+  lastError: WalletError | null;
   connectWallet: (type: WalletType) => Promise<boolean>;
   disconnectWallet: () => void;
+  checkWalletAvailability: (type: WalletType) => boolean;
 }
 
 // Create the context
@@ -34,6 +45,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastError, setLastError] = useState<WalletError | null>(null);
 
   // Check for existing connections on mount
   useEffect(() => {
@@ -47,14 +59,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         
         // Check if TronLink is connected
-        if (window.tronWeb && window.tronWeb.defaultAddress.base58) {
+        if (window.tronWeb && window.tronWeb.defaultAddress && window.tronWeb.defaultAddress.base58) {
           const address = window.tronWeb.defaultAddress.base58;
           await setupTronWallet(address);
           return;
         }
         
         // Check if Solana wallet is connected
-        if (window.solana && window.solana.isConnected) {
+        if (window.solana && window.solana.isConnected && window.solana.publicKey) {
           const address = window.solana.publicKey.toString();
           await setupSolanaWallet(address);
           return;
@@ -65,11 +77,47 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
     
     checkExistingConnections();
+
+    // Cleanup function
+    return () => {
+      if (window.ethereum) {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        window.ethereum.removeListener('chainChanged', handleChainChanged);
+        window.ethereum.removeListener('disconnect', handleDisconnect);
+      }
+      
+      if (window.solana) {
+        try {
+          window.solana.disconnect();
+        } catch (err) {
+          console.error("Error disconnecting Solana wallet:", err);
+        }
+      }
+    };
+  }, []);
+
+  // Check wallet availability
+  const checkWalletAvailability = useCallback((type: WalletType): boolean => {
+    if (!type) return false;
+    
+    if (type === 'metamask') {
+      return !!window.ethereum && !!window.ethereum.isMetaMask;
+    } else if (type === 'tronlink') {
+      return !!window.tronWeb && !!window.tronLink;
+    } else if (type === 'solana') {
+      return !!window.solana && !!window.solana.isPhantom;
+    }
+    
+    return false;
   }, []);
 
   // Setup Ethereum wallet
   const setupEthereumWallet = async (address: string) => {
     try {
+      if (!window.ethereum) {
+        throw new Error("MetaMask is not installed");
+      }
+
       // Get network
       const chainId = await window.ethereum.request({ method: 'eth_chainId' });
       let network = 'Unknown Network';
@@ -112,9 +160,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       window.ethereum.on('disconnect', handleDisconnect);
       
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error setting up Ethereum wallet:", err);
       setError("Failed to set up Ethereum wallet");
+      setLastError({
+        type: "Ethereum Error",
+        message: err.message || "Failed to set up Ethereum wallet"
+      });
       return false;
     }
   };
@@ -124,7 +176,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (accounts.length === 0) {
       // User disconnected their wallet
       disconnectWallet();
-    } else if (accounts[0] !== walletInfo?.address) {
+    } else if (walletInfo?.type === 'metamask' && accounts[0] !== walletInfo?.address) {
       // User switched accounts
       setupEthereumWallet(accounts[0]);
     }
@@ -144,6 +196,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Setup TRON wallet
   const setupTronWallet = async (address: string) => {
     try {
+      if (!window.tronWeb || !window.tronWeb.defaultAddress) {
+        throw new Error("TronLink is not installed or not properly initialized");
+      }
+
       // Get network
       const network = window.tronWeb.fullNode.host.includes('shasta')
         ? 'Shasta Testnet'
@@ -168,16 +224,21 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Set up event listeners if available
       if (window.tronWeb.eventServer) {
         window.tronWeb.eventServer.on('addressChanged', () => {
-          if (window.tronWeb.defaultAddress.base58 !== address) {
+          if (window.tronWeb && window.tronWeb.defaultAddress && 
+              window.tronWeb.defaultAddress.base58 !== address) {
             setupTronWallet(window.tronWeb.defaultAddress.base58);
           }
         });
       }
       
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error setting up TRON wallet:", err);
       setError("Failed to set up TRON wallet");
+      setLastError({
+        type: "TRON Error",
+        message: err.message || "Failed to set up TRON wallet"
+      });
       return false;
     }
   };
@@ -185,6 +246,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Setup Solana wallet
   const setupSolanaWallet = async (address: string) => {
     try {
+      if (!window.solana || !window.solana.publicKey) {
+        throw new Error("Solana wallet is not installed or not properly initialized");
+      }
+
       // Get network
       const connection = window.solana.connection;
       const network = connection.rpcEndpoint.includes('devnet')
@@ -210,7 +275,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Set up event listeners
       window.solana.on('disconnect', disconnectWallet);
       window.solana.on('accountChanged', () => {
-        if (window.solana.publicKey) {
+        if (window.solana && window.solana.publicKey) {
           setupSolanaWallet(window.solana.publicKey.toString());
         } else {
           disconnectWallet();
@@ -218,9 +283,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error setting up Solana wallet:", err);
       setError("Failed to set up Solana wallet");
+      setLastError({
+        type: "Solana Error",
+        message: err.message || "Failed to set up Solana wallet"
+      });
       return false;
     }
   };
@@ -232,6 +301,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setIsLoading(true);
     setConnecting(true);
     setError(null);
+    setLastError(null);
     
     try {
       if (type === 'metamask') {
@@ -245,6 +315,10 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } catch (err: any) {
       console.error(`Error connecting to ${type} wallet:`, err);
       setError(err.message || `Failed to connect to ${type} wallet`);
+      setLastError({
+        type: `${type.charAt(0).toUpperCase() + type.slice(1)} Connection Error`,
+        message: err.message || `Failed to connect to ${type} wallet`
+      });
       return false;
     } finally {
       setIsLoading(false);
@@ -255,7 +329,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Connect to MetaMask
   const connectMetaMask = async (): Promise<boolean> => {
     if (!window.ethereum) {
-      setError("MetaMask is not installed. Please install MetaMask extension first.");
+      const error = "MetaMask is not installed. Please install MetaMask extension first.";
+      setError(error);
+      setLastError({
+        type: "MetaMask Error",
+        message: error
+      });
       return false;
     }
     
@@ -264,7 +343,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
       
       if (accounts.length === 0) {
-        setError("No accounts found. Please unlock your MetaMask wallet.");
+        const error = "No accounts found. Please unlock your MetaMask wallet.";
+        setError(error);
+        setLastError({
+          type: "MetaMask Error",
+          message: error
+        });
         return false;
       }
       
@@ -272,9 +356,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } catch (err: any) {
       if (err.code === 4001) {
         // User rejected the request
-        setError("User rejected the connection request");
+        const error = "User rejected the connection request";
+        setError(error);
+        setLastError({
+          type: "MetaMask Error",
+          message: error
+        });
       } else {
         setError(err.message || "Failed to connect to MetaMask");
+        setLastError({
+          type: "MetaMask Error",
+          message: err.message || "Failed to connect to MetaMask"
+        });
       }
       return false;
     }
@@ -282,25 +375,31 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Connect to TronLink
   const connectTronLink = async (): Promise<boolean> => {
-    if (!window.tronWeb) {
-      setError("TronLink is not installed. Please install TronLink extension first.");
+    if (!window.tronWeb || !window.tronLink) {
+      const error = "TronLink is not installed. Please install TronLink extension first.";
+      setError(error);
+      setLastError({
+        type: "TronLink Error",
+        message: error
+      });
       return false;
     }
     
     try {
       // Check if TronLink is locked
-      if (!window.tronWeb.defaultAddress.base58) {
+      if (!window.tronWeb.defaultAddress || !window.tronWeb.defaultAddress.base58) {
         // Request account access if tronWeb is available but not connected
-        if (window.tronLink) {
-          await window.tronLink.request({ method: 'tron_requestAccounts' });
-        } else {
-          throw new Error("Please unlock your TronLink wallet");
-        }
+        await window.tronLink.request({ method: 'tron_requestAccounts' });
       }
       
       // Check again after request
-      if (!window.tronWeb.defaultAddress.base58) {
-        setError("No accounts found. Please unlock your TronLink wallet.");
+      if (!window.tronWeb.defaultAddress || !window.tronWeb.defaultAddress.base58) {
+        const error = "No accounts found. Please unlock your TronLink wallet.";
+        setError(error);
+        setLastError({
+          type: "TronLink Error",
+          message: error
+        });
         return false;
       }
       
@@ -308,9 +407,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } catch (err: any) {
       if (err.code === 4001) {
         // User rejected the request
-        setError("User rejected the connection request");
+        const error = "User rejected the connection request";
+        setError(error);
+        setLastError({
+          type: "TronLink Error",
+          message: error
+        });
       } else {
         setError(err.message || "Failed to connect to TronLink");
+        setLastError({
+          type: "TronLink Error",
+          message: err.message || "Failed to connect to TronLink"
+        });
       }
       return false;
     }
@@ -319,7 +427,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Connect to Solana wallet
   const connectSolanaWallet = async (): Promise<boolean> => {
     if (!window.solana) {
-      setError("Solana wallet is not installed. Please install Phantom or another Solana wallet extension.");
+      const error = "Solana wallet is not installed. Please install Phantom or another Solana wallet extension.";
+      setError(error);
+      setLastError({
+        type: "Solana Error",
+        message: error
+      });
       return false;
     }
     
@@ -328,7 +441,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const connected = await window.solana.connect();
       
       if (!connected || !window.solana.publicKey) {
-        setError("Failed to connect to Solana wallet");
+        const error = "Failed to connect to Solana wallet";
+        setError(error);
+        setLastError({
+          type: "Solana Error",
+          message: error
+        });
         return false;
       }
       
@@ -336,9 +454,18 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } catch (err: any) {
       if (err.code === 4001) {
         // User rejected the request
-        setError("User rejected the connection request");
+        const error = "User rejected the connection request";
+        setError(error);
+        setLastError({
+          type: "Solana Error",
+          message: error
+        });
       } else {
         setError(err.message || "Failed to connect to Solana wallet");
+        setLastError({
+          type: "Solana Error",
+          message: err.message || "Failed to connect to Solana wallet"
+        });
       }
       return false;
     }
@@ -352,7 +479,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       window.ethereum.removeListener('chainChanged', handleChainChanged);
       window.ethereum.removeListener('disconnect', handleDisconnect);
     } else if (walletInfo?.type === 'solana' && window.solana) {
-      window.solana.disconnect();
+      try {
+        window.solana.disconnect();
+      } catch (err) {
+        console.error("Error disconnecting Solana wallet:", err);
+      }
     }
     // For TronLink there's no standard disconnect method
     
@@ -360,6 +491,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setConnected(false);
     setWalletInfo(null);
     setError(null);
+    setLastError(null);
   }, [walletInfo]);
 
   // Context value
@@ -369,8 +501,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     isLoading,
     walletInfo,
     error,
+    lastError,
+    walletType: walletInfo?.type || null,
+    address: walletInfo?.address || null,
+    balance: walletInfo?.balance || null,
     connectWallet,
     disconnectWallet,
+    checkWalletAvailability
   };
 
   return (
@@ -400,7 +537,7 @@ declare global {
       removeListener: (event: string, callback: (...args: any[]) => void) => void;
     };
     tronWeb?: {
-      defaultAddress: {
+      defaultAddress?: {
         base58: string;
         hex: string;
       };
