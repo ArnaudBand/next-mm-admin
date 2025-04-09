@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/workspaces/next-mm-admin/logs/.51ae350d1318975206f06fd070ef6eec349412ce-audit.json",
+    "files": [
+        {
+            "date": 1744158445459,
+            "name": "/workspaces/next-mm-admin/logs/app-2025-04-09.log",
+            "hash": "68ad6b2025b7d1bea67e0bdd7fd54513734e905837a00be0d214c79df9daf201"
+        }
+    ],
+    "hashType": "sha256"
+}

@@ -39,6 +39,7 @@ export default function WalletConnectButton() {
     disconnectWallet, 
     isLoading,
     lastError,
+    // setLastError,
     checkWalletAvailability
   } = useWallet();
   
@@ -94,11 +95,24 @@ export default function WalletConnectButton() {
   const handleConnectWallet = async () => {
     if (!selectedWallet) return;
     
-    console.log(`Attempting to connect to ${selectedWallet}...`);
-    const success = await connectWallet(selectedWallet);
-    console.log(`Connection result: ${success}`);
-    if (success) {
-      onClose();
+    try {
+      // setError(null);
+      console.log(`Attempting to connect to ${selectedWallet}`); // Add this log
+      const success = await connectWallet(selectedWallet);
+      console.log(`Connection result: ${success}`); // Add this log
+      if (success) {
+        onClose();
+      } else {
+        console.error(`Failed to connect to ${selectedWallet}`); // Add this log
+        // setError(`Failed to connect to ${
+        //   selectedWallet === 'metamask' ? 'MetaMask' :
+        //   selectedWallet === 'tronlink' ? 'TronLink' :
+        //   'Solana Wallet'
+        // }. Please try again.`);
+      }
+    } catch (err) {
+      console.error("Connection error:", err); // Add detailed error logging
+      // setError('Failed to connect wallet. Please try again.');
     }
   };
 
