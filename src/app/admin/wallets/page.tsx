@@ -1,18 +1,30 @@
-'use client';
+"use client";
 
-import { Box, Heading, VStack, Text } from '@chakra-ui/react';
-import WalletConnectButton from 'components/wallet/WalletConnectButton';
+import { Box, Container, Heading, Text } from '@chakra-ui/react';
+import WalletConnect from 'components/wallet/WalletConnect';
+import { WalletProvider } from 'contexts/walletContext';
 
-export default function WalletPage() {
+const WalletPage = () => {
   return (
-    <Box minH="100vh" marginTop={20} py={10} px={6}>
-      <VStack spacing={8} align="center">
-        <Heading size="lg">Connect Your Wallet</Heading>
-        <Text fontSize="md" textAlign="center" maxW="400px">
-          Use the button below to connect a compatible wallet (MetaMask, TronLink, or Phantom).
-        </Text>
-        <WalletConnectButton />
-      </VStack>
+    <Box minH="100vh" bg="gray.50">
+      <Container mt={16} as="main" maxW="container.xl" px={4} py={8}>
+        <Heading as="h1" size="xl" textAlign="center" mb={8}>
+          Web3 Wallet Integration
+        </Heading>
+        
+        {/* Added bigger margin top (mt={16} is equivalent to mt-16 in Tailwind) */}
+        <Box>
+          <WalletProvider>
+            <WalletConnect />
+          </WalletProvider>
+        </Box>
+      </Container>
+      
+      <Box as="footer" textAlign="center" py={4} color="gray.500">
+        <Text>© {new Date().getFullYear()} Web3 Wallet Integration</Text>
+      </Box>
     </Box>
   );
-}
+};
+
+export default WalletPage;
